@@ -8,16 +8,18 @@ import os
 
 # --- 1. CONFIGURATION ---
 
-# CRITICAL FIX: The REQUIRED_COLS list has been expanded to include all 
-# one-hot encoded JobRole categories that are collected via the Streamlit UI.
+# CRITICAL FIX: The REQUIRED_COLS list is expanded to include all 9 common JobRole
+# categories to prevent Feature Name Mismatch error during scaling.
 REQUIRED_COLS = [
     'Age', 'MonthlyIncome', 'TotalWorkingYears', 'YearsAtCompany',
     'EnvironmentSatisfaction',
     'OverTime_No', 'OverTime_Yes',
     'MaritalStatus_Divorced', 'MaritalStatus_Married', 'MaritalStatus_Single',
+    # All 9 common Job Roles (OHE features)
     'JobRole_Sales Representative', 'JobRole_Research Scientist',
     'JobRole_Laboratory Technician', 'JobRole_Sales Executive',
-    'JobRole_Manufacturing Director', 'JobRole_Healthcare Representative' # <--- FIX: Added the missing OHE Job Roles
+    'JobRole_Manufacturing Director', 'JobRole_Healthcare Representative',
+    'JobRole_Human Resources', 'JobRole_Manager', 'JobRole_Research Director'
 ]
 
 MODEL_PATH = 'logistic_regression_model.pkl'
@@ -123,15 +125,15 @@ job_role = st.sidebar.selectbox(
     "Job Role",
     options=[
         'Sales Representative', 'Research Scientist', 'Laboratory Technician',
-        'Sales Executive', 'Manufacturing Director', 'Healthcare Representative'
-        # Add more roles if your model was trained on them
+        'Sales Executive', 'Manufacturing Director', 'Healthcare Representative',
+        'Human Resources', 'Manager', 'Research Director' # <--- FIX: Added missing Job Roles
     ]
 )
 
 # --- Main Page Prediction Button ---
 if st.button("Predict Attrition Risk"):
     # 1. Prepare Input Data Dictionary
-    # CRITICAL FIX: Initializing all OHE JobRole columns to 0.
+    # FIX: Initializing ALL 9 JobRole OHE columns to 0.
     input_data = {
         'Age': age,
         'MonthlyIncome': monthly_income,
@@ -142,7 +144,8 @@ if st.button("Predict Attrition Risk"):
         'MaritalStatus_Divorced': 0, 'MaritalStatus_Married': 0, 'MaritalStatus_Single': 0,
         'JobRole_Sales Representative': 0, 'JobRole_Research Scientist': 0,
         'JobRole_Laboratory Technician': 0, 'JobRole_Sales Executive': 0,
-        'JobRole_Manufacturing Director': 0, 'JobRole_Healthcare Representative': 0 # <--- FIX: Initialized the missing columns
+        'JobRole_Manufacturing Director': 0, 'JobRole_Healthcare Representative': 0,
+        'JobRole_Human Resources': 0, 'JobRole_Manager': 0, 'JobRole_Research Director': 0 # <--- FIX: Initialized the full set
     }
 
     # 2. Apply One-Hot Encoding to Categorical Inputs
@@ -152,15 +155,14 @@ if st.button("Predict Attrition Risk"):
     if f'MaritalStatus_{marital_status}' in input_data:
         input_data[f'MaritalStatus_{marital_status}'] = 1
 
-    # Apply only for the roles included in the dictionary/REQUIRED_COLS
+    # Apply only for the role selected
     role_col = f'JobRole_{job_role}'
     if role_col in input_data:
         input_data[role_col] = 1
 
 
     # 3. Create DataFrame and enforce column order
-    # This reindex step now works correctly because the input_data dictionary
-    # contains all necessary columns listed in REQUIRED_COLS.
+    # The dataframe will now always have 19 features in the correct order.
     try:
         input_df = pd.DataFrame([input_data])
         # Reindex to ensure all columns exist and are in the correct order
