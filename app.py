@@ -95,33 +95,4 @@ job_role = st.sidebar.selectbox("Job Role", ["Sales Representative", "Research S
 job_sales_rep = int(job_role == "Sales Representative")
 job_research = int(job_role == "Research Scientist")
 job_lab_tech = int(job_role == "Laboratory Technician")
-job_sales_exec = int(job_role == "Sales Executive")
-
-# --- 6. PREPARE INPUT DATAFRAME ---
-input_df = pd.DataFrame([{
-    'Age': age,
-    'MonthlyIncome': monthly_income,
-    'TotalWorkingYears': total_working_years,
-    'YearsAtCompany': years_at_company,
-    'EnvironmentSatisfaction': env_satisfaction,
-    'OverTime_No': overtime_no,
-    'OverTime_Yes': overtime_yes,
-    'MaritalStatus_Divorced': marital_divorced,
-    'MaritalStatus_Married': marital_married,
-    'MaritalStatus_Single': marital_single,
-    'JobRole_Sales Representative': job_sales_rep,
-    'JobRole_Research Scientist': job_research,
-    'JobRole_Laboratory Technician': job_lab_tech,
-    'JobRole_Sales Executive': job_sales_exec
-}])
-
-# --- 7. PREDICT AND DISPLAY ---
-if st.button("Predict Attrition Risk"):
-    input_scaled = scaler.transform(input_df)
-    prediction_prob = model.predict_proba(input_scaled)[0][1]
-    
-    st.subheader(f"Predicted Attrition Risk: {prediction_prob:.2%}")
-    if prediction_prob > 0.5:
-        st.warning("⚠️ High risk of attrition!")
-    else:
-        st.success("✅ Low risk of attrition")
+job_sales_exec = in
