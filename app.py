@@ -1,206 +1,178 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import pickle
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+import joblib
 import os
 
-# --- 1. CONFIGURATION ---
-
-# CRITICAL FIX: The REQUIRED_COLS list is expanded to include all 9 common JobRole
-# categories to prevent Feature Name Mismatch error during scaling.
-REQUIRED_COLS = [
-    'Age', 'MonthlyIncome', 'TotalWorkingYears', 'YearsAtCompany',
-    'EnvironmentSatisfaction',
-    'OverTime_No', 'OverTime_Yes',
-    'MaritalStatus_Divorced', 'MaritalStatus_Married', 'MaritalStatus_Single',
-    # All 9 common Job Roles (OHE features)
-    'JobRole_Sales Representative', 'JobRole_Research Scientist',
-    'JobRole_Laboratory Technician', 'JobRole_Sales Executive',
-    'JobRole_Manufacturing Director', 'JobRole_Healthcare Representative',
-    'JobRole_Human Resources', 'JobRole_Manager', 'JobRole_Research Director'
+# ----------------------------------------------------
+# Load the trained model (tries .joblib first, then common .pkl names)
+# ----------------------------------------------------
+MODEL_CANDIDATES = [
+logistic_regression_model.pkl
+    scaler.pkl
 ]
 
-MODEL_PATH = 'logistic_regression_model.pkl'
-SCALER_PATH = 'scaler.pkl'
+model = None
+found = None
+for fname in MODEL_CANDIDATES:
+    if os.path.exists(fname):
+        found = fname
+        break
 
-# --- 2. MOCK SETUP (Run Once if files are missing) ---
-# This ensures the app is runnable even without the user's saved files.
-# Users should replace model.pkl and scaler.pkl with their actual files.
-def create_mock_files():
-    """Creates mock model and scaler files for initial run."""
-    st.info("Creating mock model and scaler files for demonstration. Please replace them with your actual model.pkl and scaler.pkl for real use.")
-
-    # 1. Generate dummy data for training (must match REQUIRED_COLS)
-    data = {}
-    for col in ['Age', 'MonthlyIncome', 'TotalWorkingYears', 'YearsAtCompany', 'EnvironmentSatisfaction']:
-        data[col] = np.random.rand(100) * 100
-    for col in REQUIRED_COLS[5:]:
-        data[col] = np.random.randint(0, 2, 100)
-
-    X_mock = pd.DataFrame(data, columns=REQUIRED_COLS) # Explicitly setting columns
-    y_mock = np.random.randint(0, 2, 100) # Target: Attrition (0=No, 1=Yes)
-
-    # 2. Train and save mock scaler
-    mock_scaler = StandardScaler()
-    X_scaled_mock = mock_scaler.fit_transform(X_mock)
-    with open(SCALER_PATH, 'wb') as f:
-        pickle.dump(mock_scaler, f)
-
-    # 3. Train and save mock model
-    mock_model = LogisticRegression(solver='liblinear')
-    mock_model.fit(X_scaled_mock, y_mock)
-    with open(MODEL_PATH, 'wb') as f:
-        pickle.dump(mock_model, f)
-    st.success("Mock model and scaler created!")
-
-
-if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
-    create_mock_files()
-
-# --- 3. LOAD MODEL AND SCALER ---
-
-try:
-    with open(MODEL_PATH, 'rb') as f:
-        model = pickle.load(f)
-    with open(SCALER_PATH, 'rb') as f:
-        scaler = pickle.load(f)
-except Exception as e:
-    st.error(f"Error loading model or scaler files: {e}")
+if found is None:
+    st.error(
+        "❌ No trained model found. Place one of the model files in the app folder: 'attrition_model.joblib', 'employee-attrition.joblib', 'employee-attrition.pkl', or 'attrition_model.pkl'."
+    )
     st.stop()
 
+try:
+    if found.endswith(".joblib"):
+        try:
+            model = joblib.load(found)
+        except AttributeError as e:
+            # Common situation: sklearn helper classes moved between versions and
+            # the pickled object references a class path that doesn't exist.
+            # Try to parse the missing attribute and module from the message,
+            # create a minimal placeholder class in that module, and retry.
+            import re
+            import importlib
 
-# --- 4. STREAMLIT UI AND LOGIC ---
+            msg = str(e)
+            m = re.search(r"Can't get attribute '(?P<attr>[^']+)' on <module '(?P<mod>[^']+)'", msg)
+            if m:
+                missing_attr = m.group('attr')
+                missing_mod = m.group('mod')
+                try:
+                    mod = importlib.import_module(missing_mod)
+                    # create a simple placeholder class with the same name
+                    placeholder = type(missing_attr, (), {})
+                    setattr(mod, missing_attr, placeholder)
+                    st.warning(f"Compatibility shim: created placeholder {missing_attr} in module {missing_mod}; retrying model load.")
+                    model = joblib.load(found)
+                except Exception as e2:
+                    st.error(f"Failed to create compatibility shim for '{missing_attr}' in module '{missing_mod}': {e2}")
+                    st.stop()
+            else:
+                st.error(f"Failed to load joblib model '{found}': {e}")
+                st.stop()
+    else:
+        # fall back to pickle for .pkl files
+        with open(found, "rb") as f:
+            model = pickle.load(f)
+except Exception as e:
+    st.error(f"Failed to load model '{found}': {e}")
+    st.stop()
 
-st.set_page_config(page_title="Employee Attrition Risk Predictor", layout="centered")
+# ----------------------------------------------------
+# Streamlit page configuration
+# ----------------------------------------------------
+st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
+st.title("💼 Employee Attrition Prediction App")
 
 st.markdown("""
-    <style>
-    .reportview-container .main {
-        background-color: #f0f2f6;
-    }
-    .stButton>button {
-        background-color: #4CAF50;
-        color: white;
-        font-weight: bold;
-        border-radius: 12px;
-        padding: 10px 24px;
-        border: none;
-        transition: 0.3s;
-    }
-    .stButton>button:hover {
-        background-color: #45a049;
-    }
-    </style>
-""", unsafe_allow_html=True)
+This app predicts whether an employee is likely to **leave (Attrition = Yes)** or **stay (Attrition = No)**  
+based on their work-related information.
+""")
 
-st.title("👨‍💼 Employee Attrition Risk Predictor")
-st.markdown("Use this tool to estimate the probability of an employee leaving the company based on key factors identified by the Logistic Regression model.")
+# ----------------------------------------------------
+# Input Section
+# ----------------------------------------------------
+st.header("🧾 Enter Employee Details")
 
-# --- Sidebar for Input ---
-st.sidebar.header("Employee Profile Input")
+col1, col2, col3 = st.columns(3)
 
-# Numerical Inputs
-age = st.sidebar.slider("Age (Years)", 18, 60, 30)
-monthly_income = st.sidebar.number_input("Monthly Income (USD)", 1000, 20000, 5000)
-total_years = st.sidebar.slider("Total Working Years", 0, 40, 5)
-years_at_company = st.sidebar.slider("Years at Company", 0, 40, 3)
+with col1:
+    Age = st.number_input("Age", min_value=18, max_value=60, value=30)
+    DailyRate = st.number_input("DailyRate", min_value=0, value=800)
+    DistanceFromHome = st.number_input("DistanceFromHome", min_value=0, value=5)
+    Education = st.selectbox("Education (1–5)", [1, 2, 3, 4, 5])
+    EnvironmentSatisfaction = st.selectbox("Environment Satisfaction (1–4)", [1, 2, 3, 4])
+    HourlyRate = st.number_input("HourlyRate", min_value=0, value=60)
+    JobInvolvement = st.selectbox("Job Involvement (1–4)", [1, 2, 3, 4])
+    JobLevel = st.selectbox("Job Level (1–5)", [1, 2, 3, 4, 5])
 
-# Ordinal/Categorical Mapped to Numerical
-environment_satisfaction_map = {
-    "1 - Low": 1, "2 - Medium": 2, "3 - High": 3, "4 - Very High": 4
-}
-env_satisfaction_label = st.sidebar.selectbox(
-    "Environment Satisfaction",
-    options=list(environment_satisfaction_map.keys()),
-    index=2
-)
-env_satisfaction = environment_satisfaction_map[env_satisfaction_label]
+with col2:
+    JobSatisfaction = st.selectbox("Job Satisfaction (1–4)", [1, 2, 3, 4])
+    MonthlyIncome = st.number_input("Monthly Income", min_value=1000, max_value=20000, value=5000)
+    MonthlyRate = st.number_input("Monthly Rate", min_value=1000, max_value=30000, value=10000)
+    NumCompaniesWorked = st.number_input("Num Companies Worked", min_value=0, value=2)
+    PercentSalaryHike = st.number_input("Percent Salary Hike", min_value=0, value=10)
+    PerformanceRating = st.selectbox("Performance Rating (1–4)", [1, 2, 3, 4])
+    RelationshipSatisfaction = st.selectbox("Relationship Satisfaction (1–4)", [1, 2, 3, 4])
+    StockOptionLevel = st.selectbox("Stock Option Level (0–3)", [0, 1, 2, 3])
 
-# Categorical Inputs
-overtime = st.sidebar.selectbox("OverTime", options=['Yes', 'No'])
-marital_status = st.sidebar.selectbox("Marital Status", options=['Single', 'Married', 'Divorced'])
-job_role = st.sidebar.selectbox(
-    "Job Role",
-    options=[
-        'Sales Representative', 'Research Scientist', 'Laboratory Technician',
-        'Sales Executive', 'Manufacturing Director', 'Healthcare Representative',
-        'Human Resources', 'Manager', 'Research Director' # <--- FIX: Added missing Job Roles
-    ]
-)
+with col3:
+    TotalWorkingYears = st.number_input("Total Working Years", min_value=0, value=5)
+    TrainingTimesLastYear = st.number_input("Training Times Last Year", min_value=0, value=2)
+    WorkLifeBalance = st.selectbox("Work Life Balance (1–4)", [1, 2, 3, 4])
+    YearsAtCompany = st.number_input("Years At Company", min_value=0, value=3)
+    YearsInCurrentRole = st.number_input("Years In Current Role", min_value=0, value=2)
+    YearsSinceLastPromotion = st.number_input("Years Since Last Promotion", min_value=0, value=1)
+    YearsWithCurrManager = st.number_input("Years With Current Manager", min_value=0, value=2)
+    BusinessTravel = st.selectbox("Business Travel", ["Travel_Rarely", "Travel_Frequently", "Non-Travel"])
+    Department = st.selectbox("Department", ["Sales", "Research & Development", "Human Resources"])
+    EducationField = st.selectbox("Education Field", ["Life Sciences", "Medical", "Marketing", "Technical Degree", "Human Resources", "Other"])
+    Gender = st.selectbox("Gender", ["Male", "Female"])
+    JobRole = st.selectbox("Job Role", [
+        "Sales Executive", "Research Scientist", "Laboratory Technician",
+        "Manufacturing Director", "Healthcare Representative",
+        "Manager", "Sales Representative", "Research Director", "Human Resources"
+    ])
+    MaritalStatus = st.selectbox("Marital Status", ["Single", "Married", "Divorced"])
+    OverTime = st.selectbox("OverTime", ["Yes", "No"])
 
-# --- Main Page Prediction Button ---
-if st.button("Predict Attrition Risk"):
-    # 1. Prepare Input Data Dictionary
-    # FIX: Initializing ALL 9 JobRole OHE columns to 0.
-    input_data = {
-        'Age': age,
-        'MonthlyIncome': monthly_income,
-        'TotalWorkingYears': total_years,
-        'YearsAtCompany': years_at_company,
-        'EnvironmentSatisfaction': env_satisfaction,
-        'OverTime_No': 0, 'OverTime_Yes': 0,
-        'MaritalStatus_Divorced': 0, 'MaritalStatus_Married': 0, 'MaritalStatus_Single': 0,
-        'JobRole_Sales Representative': 0, 'JobRole_Research Scientist': 0,
-        'JobRole_Laboratory Technician': 0, 'JobRole_Sales Executive': 0,
-        'JobRole_Manufacturing Director': 0, 'JobRole_Healthcare Representative': 0,
-        'JobRole_Human Resources': 0, 'JobRole_Manager': 0, 'JobRole_Research Director': 0 # <--- FIX: Initialized the full set
-    }
+# ----------------------------------------------------
+# Prepare Input DataFrame
+# ----------------------------------------------------
+input_data = pd.DataFrame([{
+    'Age': Age,
+    'DailyRate': DailyRate,
+    'DistanceFromHome': DistanceFromHome,
+    'Education': Education,
+    'EnvironmentSatisfaction': EnvironmentSatisfaction,
+    'HourlyRate': HourlyRate,
+    'JobInvolvement': JobInvolvement,
+    'JobLevel': JobLevel,
+    'JobSatisfaction': JobSatisfaction,
+    'MonthlyIncome': MonthlyIncome,
+    'MonthlyRate': MonthlyRate,
+    'NumCompaniesWorked': NumCompaniesWorked,
+    'PercentSalaryHike': PercentSalaryHike,
+    'PerformanceRating': PerformanceRating,
+    'RelationshipSatisfaction': RelationshipSatisfaction,
+    'StockOptionLevel': StockOptionLevel,
+    'TotalWorkingYears': TotalWorkingYears,
+    'TrainingTimesLastYear': TrainingTimesLastYear,
+    'WorkLifeBalance': WorkLifeBalance,
+    'YearsAtCompany': YearsAtCompany,
+    'YearsInCurrentRole': YearsInCurrentRole,
+    'YearsSinceLastPromotion': YearsSinceLastPromotion,
+    'YearsWithCurrManager': YearsWithCurrManager,
+    'BusinessTravel': BusinessTravel,
+    'Department': Department,
+    'EducationField': EducationField,
+    'Gender': Gender,
+    'JobRole': JobRole,
+    'MaritalStatus': MaritalStatus,
+    'OverTime': OverTime
+}])
 
-    # 2. Apply One-Hot Encoding to Categorical Inputs
-    if f'OverTime_{overtime}' in input_data:
-        input_data[f'OverTime_{overtime}'] = 1
-
-    if f'MaritalStatus_{marital_status}' in input_data:
-        input_data[f'MaritalStatus_{marital_status}'] = 1
-
-    # Apply only for the role selected
-    role_col = f'JobRole_{job_role}'
-    if role_col in input_data:
-        input_data[role_col] = 1
-
-
-    # 3. Create DataFrame and enforce column order
-    # The dataframe will now always have 19 features in the correct order.
+# ----------------------------------------------------
+# Make Prediction
+# ----------------------------------------------------
+if st.button("🔍 Predict Attrition"):
     try:
-        input_df = pd.DataFrame([input_data])
-        # Reindex to ensure all columns exist and are in the correct order
-        input_df = input_df.reindex(columns=REQUIRED_COLS, fill_value=0)
+        prediction = model.predict(input_data)[0]
+        prob = model.predict_proba(input_data)[0][1]
+
+        if prediction == "Yes" or prediction == 1:
+            st.error(f"⚠️ The employee is **likely to leave**. (Probability: {prob:.2f})")
+        else:
+            st.success(f"✅ The employee is **likely to stay**. (Leave Probability: {prob:.2f})")
+
+        st.write("---")
+        st.subheader("🧠 Model Input Data")
+        st.dataframe(input_data)
+
     except Exception as e:
-        st.error(f"Error structuring input data: {e}")
-        st.stop()
-
-
-    # 4. Scale the input data
-    input_scaled = scaler.transform(input_df)
-
-    # 5. Make Prediction
-    # Prediction Probability (P(Attrition=1))
-    prediction_proba = model.predict_proba(input_scaled)[:, 1][0]
-    risk_percent = round(prediction_proba * 100, 2)
-
-    st.subheader("Prediction Result")
-
-    # Display results with dynamic styling
-    if risk_percent > 70:
-        st.error(f"🔴 High Attrition Risk: {risk_percent}% Probability")
-        st.markdown("**Recommendation:** Immediate intervention and retention strategy required.")
-    elif risk_percent > 40:
-        st.warning(f"🟡 Moderate Attrition Risk: {risk_percent}% Probability")
-        st.markdown("**Recommendation:** Monitor closely and conduct proactive stay interviews.")
-    else:
-        st.success(f"🟢 Low Attrition Risk: {risk_percent}% Probability")
-        st.markdown("**Recommendation:** This employee is likely stable. Continue standard engagement practices.")
-
-    # Show the underlying data for transparency (optional)
-    with st.expander("Show detailed prediction features"):
-        st.dataframe(input_df.iloc[0])
-
-# --- Footer ---
-st.markdown(
-    """
-    ---
-    *Disclaimer: This prediction is based on a Logistic Regression model and historical data, and should be used as an indicator, not a definitive forecast.*
-    """
-)
+        st.error(f"Prediction failed: {e}")
