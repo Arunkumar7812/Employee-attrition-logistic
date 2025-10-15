@@ -5,6 +5,7 @@ import joblib
 import os
 
 # ----------------------------------------------------
+<<<<<<< HEAD
 # Load the trained model and scaler
 # ----------------------------------------------------
 MODEL_CANDIDATES = ["logistic_regression_model.pkl", "attrition_model.pkl", "employee-attrition.pkl", "attrition_model.joblib"]
@@ -39,6 +40,67 @@ for fname in SCALER_CANDIDATES:
 
 if scaler is None:
     st.warning("⚠️ No scaler file found. Model input will not be scaled.")
+=======
+# Load the trained model (tries .joblib first, then common .pkl names)
+# ----------------------------------------------------
+MODEL_CANDIDATES = [
+    "attrition_model.joblib",
+    "employee-attrition.joblib",
+    "employee-attrition.pkl",
+    "attrition_model.pkl",
+]
+
+model = None
+found = None
+for fname in MODEL_CANDIDATES:
+    if os.path.exists(fname):
+        found = fname
+        break
+
+if found is None:
+    st.error(
+        "❌ No trained model found. Place one of the model files in the app folder: 'attrition_model.joblib', 'employee-attrition.joblib', 'employee-attrition.pkl', or 'attrition_model.pkl'."
+    )
+    st.stop()
+
+try:
+    if found.endswith(".joblib"):
+        try:
+            model = joblib.load(found)
+        except AttributeError as e:
+            # Common situation: sklearn helper classes moved between versions and
+            # the pickled object references a class path that doesn't exist.
+            # Try to parse the missing attribute and module from the message,
+            # create a minimal placeholder class in that module, and retry.
+            import re
+            import importlib
+
+            msg = str(e)
+            m = re.search(r"Can't get attribute '(?P<attr>[^']+)' on <module '(?P<mod>[^']+)'", msg)
+            if m:
+                missing_attr = m.group('attr')
+                missing_mod = m.group('mod')
+                try:
+                    mod = importlib.import_module(missing_mod)
+                    # create a simple placeholder class with the same name
+                    placeholder = type(missing_attr, (), {})
+                    setattr(mod, missing_attr, placeholder)
+                    st.warning(f"Compatibility shim: created placeholder {missing_attr} in module {missing_mod}; retrying model load.")
+                    model = joblib.load(found)
+                except Exception as e2:
+                    st.error(f"Failed to create compatibility shim for '{missing_attr}' in module '{missing_mod}': {e2}")
+                    st.stop()
+            else:
+                st.error(f"Failed to load joblib model '{found}': {e}")
+                st.stop()
+    else:
+        # fall back to pickle for .pkl files
+        with open(found, "rb") as f:
+            model = pickle.load(f)
+except Exception as e:
+    st.error(f"Failed to load model '{found}': {e}")
+    st.stop()
+>>>>>>> 8064106 (Updated app and data files)
 
 # ----------------------------------------------------
 # Streamlit page configuration
@@ -139,6 +201,7 @@ input_data = pd.DataFrame([{
 # ----------------------------------------------------
 if st.button("🔍 Predict Attrition"):
     try:
+<<<<<<< HEAD
         # One-hot encode categorical variables if model expects them
         input_processed = pd.get_dummies(input_data)
 
@@ -160,6 +223,12 @@ if st.button("🔍 Predict Attrition"):
         prob = model.predict_proba(input_scaled)[0][1]
 
         if prediction == 1 or str(prediction).lower() == "yes":
+=======
+        prediction = model.predict(input_data)[0]
+        prob = model.predict_proba(input_data)[0][1]
+
+        if prediction == "Yes" or prediction == 1:
+>>>>>>> 8064106 (Updated app and data files)
             st.error(f"⚠️ The employee is **likely to leave**. (Probability: {prob:.2f})")
         else:
             st.success(f"✅ The employee is **likely to stay**. (Leave Probability: {prob:.2f})")
@@ -169,4 +238,8 @@ if st.button("🔍 Predict Attrition"):
         st.dataframe(input_data)
 
     except Exception as e:
+<<<<<<< HEAD
         st.error(f"Prediction failed: {e}")
+=======
+        st.error(f"Prediction failed: {e}")
+>>>>>>> 8064106 (Updated app and data files)
