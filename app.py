@@ -5,7 +5,7 @@ import joblib
 import os
 
 # ----------------------------------------------------
-<<<<<<< HEAD
+
 # Load the trained model and scaler
 # ----------------------------------------------------
 MODEL_CANDIDATES = ["logistic_regression_model.pkl", "attrition_model.pkl", "employee-attrition.pkl", "attrition_model.joblib"]
