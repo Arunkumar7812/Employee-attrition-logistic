@@ -187,4 +187,45 @@ if st.button("🔍 Predict Attrition"):
         # Add missing columns as 0 and drop extra columns
         missing_cols = set(expected_cols) - set(input_processed.columns)
         for c in missing_cols:
-            input_proces_
+            input_processed[c] = 0
+        input_processed = input_processed[expected_cols]
+
+        # 3. Ensure all columns are numeric
+        input_processed = input_processed.astype(float)
+
+        # 4. Fill any NaN
+        input_processed = input_processed.fillna(0)
+
+        # 5. Apply scaler if available
+        if scaler is not None:
+            input_scaled = scaler.transform(input_processed)
+        else:
+            input_scaled = input_processed.values
+
+        # 6. Predict
+        prediction_output = model.predict(input_scaled)[0]
+
+        # 7. Predict probability of attrition (Yes / positive class)
+        try:
+            prob = model.predict_proba(input_scaled)[0][1]
+        except:
+            prob = None
+
+        # 8. Display result
+        if prediction_output in [1, "Yes"]:
+            msg = f"⚠️ The employee is **likely to leave**."
+            if prob is not None:
+                msg += f" (Probability: {prob:.2f})"
+            st.error(msg)
+        else:
+            msg = f"✅ The employee is **likely to stay**."
+            if prob is not None:
+                msg += f" (Leave Probability: {prob:.2f})"
+            st.success(msg)
+
+        st.write("---")
+        st.subheader("🧠 Model Input Data")
+        st.dataframe(input_data)
+
+    except Exception as e:
+        st.error(f"Prediction failed: {e}")
