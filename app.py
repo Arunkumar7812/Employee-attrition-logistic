@@ -1,231 +1,174 @@
 import streamlit as st
 import pandas as pd
 import pickle
-import joblib
-import os
-import re
-import importlib
+import numpy as np
 
-# ----------------------------------------------------
-# Load the trained model and scaler
-# ----------------------------------------------------
-
-MODEL_CANDIDATES = [
-    "attrition_model.joblib",
-    "employee-attrition.joblib",
-    "logistic_regression_model.pkl",
-    "attrition_model.pkl",
-    "employee-attrition.pkl",
-]
-
-SCALER_CANDIDATES = ["scaler.joblib", "scaler.pkl"]
-
-model = None
-scaler = None
-
-# --- Load Model ---
-model_found = next((f for f in MODEL_CANDIDATES if os.path.exists(f)), None)
-
-if model_found is None:
-    st.error(
-        "❌ No trained model found. Place one of the model files in the app folder: "
-        "'attrition_model.joblib', 'employee-attrition.joblib', 'logistic_regression_model.pkl', "
-        "'attrition_model.pkl', or 'employee-attrition.pkl'."
-    )
-    st.stop()
-
+# --- 1. Load the Model ---
+MODEL_PATH = 'employee-attrition.pkl'
 try:
-    if model_found.endswith(".joblib"):
-        try:
-            model = joblib.load(model_found)
-        except AttributeError as e:
-            # Compatibility shim for sklearn version issues
-            msg = str(e)
-            m = re.search(r"Can't get attribute '(?P<attr>[^']+)' on <module '(?P<mod>[^']+)'", msg)
-            if m:
-                missing_attr = m.group('attr')
-                missing_mod = m.group('mod')
-                mod = importlib.import_module(missing_mod)
-                placeholder = type(missing_attr, (), {})
-                setattr(mod, missing_attr, placeholder)
-                st.warning(f"Compatibility shim: created placeholder {missing_attr} in module {missing_mod}; retrying model load.")
-                model = joblib.load(model_found)
-            else:
-                st.error(f"Failed to load joblib model '{model_found}': {e}")
-                st.stop()
-    else:
-        with open(model_found, "rb") as f:
-            model = pickle.load(f)
+    with open(MODEL_PATH, 'rb') as file:
+        model = pickle.load(file)
+    st.success(f"Model loaded successfully from {MODEL_PATH}")
+except FileNotFoundError:
+    st.error(f"Error: Model file '{MODEL_PATH}' not found. Please ensure it is in the same directory.")
+    model = None
 except Exception as e:
-    st.error(f"Failed to load model '{model_found}': {e}")
-    st.stop()
+    st.error(f"Error loading model: {e}")
+    model = None
 
-# --- Load Scaler ---
-scaler_found = next((f for f in SCALER_CANDIDATES if os.path.exists(f)), None)
+# --- 2. Configuration and Helper Data ---
 
-if scaler_found:
-    try:
-        if scaler_found.endswith(".joblib"):
-            scaler = joblib.load(scaler_found)
-        else:
-            with open(scaler_found, "rb") as f:
-                scaler = pickle.load(f)
-    except Exception as e:
-        st.error(f"Failed to load scaler '{scaler_found}': {e}")
-        scaler = None
+# Define the features and their possible values/ranges based on a typical HR Attrition dataset.
+# The order of features in the input DataFrame MUST match the order expected by the pipeline.
+# Since the pipeline uses a ColumnTransformer, the feature names just need to be correct, 
+# but defining them is crucial for the Streamlit UI.
 
-if scaler is None:
-    st.warning("⚠️ No scaler file found or failed to load. Proceeding with unscaled data.")
+# This dictionary is used to create the user inputs in the sidebar.
+FEATURE_DEFS = {
+    'Age': {'type': 'slider', 'min': 18, 'max': 60, 'default': 35},
+    'Gender': {'type': 'select', 'options': ['Male', 'Female'], 'default': 'Male'},
+    'MaritalStatus': {'type': 'select', 'options': ['Single', 'Married', 'Divorced'], 'default': 'Married'},
+    'Department': {'type': 'select', 'options': ['Research & Development', 'Sales', 'Human Resources'], 'default': 'Research & Development'},
+    'JobRole': {'type': 'select', 'options': ['Sales Executive', 'Research Scientist', 'Laboratory Technician', 'Manufacturing Director', 'Healthcare Representative', 'Manager', 'Sales Representative', 'Research Director', 'Human Resources'], 'default': 'Research Scientist'},
+    'BusinessTravel': {'type': 'select', 'options': ['Non-Travel', 'Travel_Rarely', 'Travel_Frequently'], 'default': 'Travel_Rarely'},
+    'DistanceFromHome': {'type': 'slider', 'min': 1, 'max': 29, 'default': 10},
+    'OverTime': {'type': 'select', 'options': ['Yes', 'No'], 'default': 'No'},
+    'MonthlyIncome': {'type': 'slider', 'min': 1000, 'max': 20000, 'default': 5000, 'step': 100},
+    'TotalWorkingYears': {'type': 'slider', 'min': 0, 'max': 40, 'default': 10},
+    'YearsAtCompany': {'type': 'slider', 'min': 0, 'max': 40, 'default': 5},
+    'JobSatisfaction': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Low, 4=High'},
+    'EnvironmentSatisfaction': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Low, 4=High'},
+}
 
-# ----------------------------------------------------
-# Streamlit page configuration
-# ----------------------------------------------------
-st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
-st.title("💼 Employee Attrition Prediction App")
-st.markdown(
-    "This app predicts whether an employee is likely to **leave (Attrition = Yes)** "
-    "or **stay (Attrition = No)** based on their work-related information."
-)
+# Placeholder for Feature Importance (Replace with actual data from your notebook's Cell 35)
+# This mock data is just to show how the display works.
+FEATURE_COEFFICIENTS = pd.DataFrame({
+    'Feature': [
+        'OverTime_Yes', 'MaritalStatus_Single', 'JobRole_Sales Representative', 
+        'Department_Human Resources', 'DistanceFromHome', 'TotalWorkingYears', 
+        'JobSatisfaction_4', 'MonthlyIncome', 'Age', 'YearsAtCompany'
+    ],
+    'Coefficient': [
+        2.5, 1.8, 1.5, 1.2, 0.8, -1.5, -1.8, -2.0, -2.5, -2.8
+    ]
+}).sort_values(by='Coefficient', ascending=False).set_index('Feature')
 
-# ----------------------------------------------------
-# Input Section
-# ----------------------------------------------------
-st.header("🧾 Enter Employee Details")
-col1, col2, col3 = st.columns(3)
 
-with col1:
-    Age = st.number_input("Age", min_value=18, max_value=60, value=30)
-    DailyRate = st.number_input("DailyRate", min_value=0, value=800)
-    DistanceFromHome = st.number_input("DistanceFromHome", min_value=0, value=5)
-    Education = st.selectbox("Education (1–5)", [1, 2, 3, 4, 5])
-    EnvironmentSatisfaction = st.selectbox("Environment Satisfaction (1–4)", [1, 2, 3, 4])
-    HourlyRate = st.number_input("HourlyRate", min_value=0, value=60)
-    JobInvolvement = st.selectbox("Job Involvement (1–4)", [1, 2, 3, 4])
-    JobLevel = st.selectbox("Job Level (1–5)", [1, 2, 3, 4, 5])
+# --- 3. Streamlit App Layout and Logic ---
 
-with col2:
-    JobSatisfaction = st.selectbox("Job Satisfaction (1–4)", [1, 2, 3, 4])
-    MonthlyIncome = st.number_input("Monthly Income", min_value=1000, max_value=20000, value=5000)
-    MonthlyRate = st.number_input("Monthly Rate", min_value=1000, max_value=30000, value=10000)
-    NumCompaniesWorked = st.number_input("Num Companies Worked", min_value=0, value=2)
-    PercentSalaryHike = st.number_input("Percent Salary Hike", min_value=0, value=10)
-    PerformanceRating = st.selectbox("Performance Rating (1–4)", [1, 2, 3, 4])
-    RelationshipSatisfaction = st.selectbox("Relationship Satisfaction (1–4)", [1, 2, 3, 4])
-    StockOptionLevel = st.selectbox("Stock Option Level (0–3)", [0, 1, 2, 3])
+def get_user_input():
+    """Collects user input from the sidebar based on FEATURE_DEFS."""
+    input_data = {}
+    
+    st.sidebar.markdown("### Employee Attributes")
+    
+    for feature, config in FEATURE_DEFS.items():
+        key = feature.replace(' ', '_')
+        
+        if config['type'] == 'slider':
+            input_data[feature] = st.sidebar.slider(
+                feature, 
+                min_value=config['min'], 
+                max_value=config['max'], 
+                value=config['default'], 
+                step=config.get('step', 1)
+            )
+        elif config['type'] == 'select':
+            input_data[feature] = st.sidebar.selectbox(
+                feature, 
+                options=config['options'], 
+                index=config['options'].index(config['default']),
+                help=config.get('help', None)
+            )
+            
+    # Convert input to a single-row DataFrame
+    return pd.DataFrame([input_data])
 
-with col3:
-    TotalWorkingYears = st.number_input("Total Working Years", min_value=0, value=5)
-    TrainingTimesLastYear = st.number_input("Training Times Last Year", min_value=0, value=2)
-    WorkLifeBalance = st.selectbox("Work Life Balance (1–4)", [1, 2, 3, 4])
-    YearsAtCompany = st.number_input("Years At Company", min_value=0, value=3)
-    YearsInCurrentRole = st.number_input("Years In Current Role", min_value=0, value=2)
-    YearsSinceLastPromotion = st.number_input("Years Since Last Promotion", min_value=0, value=1)
-    YearsWithCurrManager = st.number_input("Years With Current Manager", min_value=0, value=2)
-    BusinessTravel = st.selectbox("Business Travel", ["Travel_Rarely", "Travel_Frequently", "Non-Travel"])
-    Department = st.selectbox("Department", ["Sales", "Research & Development", "Human Resources"])
-    EducationField = st.selectbox("Education Field", ["Life Sciences", "Medical", "Marketing", "Technical Degree", "Human Resources", "Other"])
-    Gender = st.selectbox("Gender", ["Male", "Female"])
-    JobRole = st.selectbox("Job Role", [
-        "Sales Executive", "Research Scientist", "Laboratory Technician",
-        "Manufacturing Director", "Healthcare Representative",
-        "Manager", "Sales Representative", "Research Director", "Human Resources"
-    ])
-    MaritalStatus = st.selectbox("Marital Status", ["Single", "Married", "Divorced"])
-    OverTime = st.selectbox("OverTime", ["Yes", "No"])
+def display_feature_importance(df):
+    """Displays the top factors from the coefficient analysis."""
+    st.markdown("---")
+    st.header("Model Insights: Feature Importance")
+    st.markdown("""
+        The factors below show the effect of each feature on the likelihood of Attrition.
+        (Note: These are sample values. Replace with the actual coefficients from your model.)
+    """)
 
-# ----------------------------------------------------
-# Prepare Input DataFrame
-# ----------------------------------------------------
-input_data = pd.DataFrame([{
-    'Age': Age,
-    'DailyRate': DailyRate,
-    'DistanceFromHome': DistanceFromHome,
-    'Education': Education,
-    'EnvironmentSatisfaction': EnvironmentSatisfaction,
-    'HourlyRate': HourlyRate,
-    'JobInvolvement': JobInvolvement,
-    'JobLevel': JobLevel,
-    'JobSatisfaction': JobSatisfaction,
-    'MonthlyIncome': MonthlyIncome,
-    'MonthlyRate': MonthlyRate,
-    'NumCompaniesWorked': NumCompaniesWorked,
-    'PercentSalaryHike': PercentSalaryHike,
-    'PerformanceRating': PerformanceRating,
-    'RelationshipSatisfaction': RelationshipSatisfaction,
-    'StockOptionLevel': StockOptionLevel,
-    'TotalWorkingYears': TotalWorkingYears,
-    'TrainingTimesLastYear': TrainingTimesLastYear,
-    'WorkLifeBalance': WorkLifeBalance,
-    'YearsAtCompany': YearsAtCompany,
-    'YearsInCurrentRole': YearsInCurrentRole,
-    'YearsSinceLastPromotion': YearsSinceLastPromotion,
-    'YearsWithCurrManager': YearsWithCurrManager,
-    'BusinessTravel': BusinessTravel,
-    'Department': Department,
-    'EducationField': EducationField,
-    'Gender': Gender,
-    'JobRole': JobRole,
-    'MaritalStatus': MaritalStatus,
-    'OverTime': OverTime
-}])
+    top_increase = df.head(5).reset_index()
+    top_decrease = df.tail(5).sort_values(by='Coefficient', ascending=True).reset_index()
 
-# ----------------------------------------------------
-# Make Prediction (Robust Version)
-# ----------------------------------------------------
-if st.button("🔍 Predict Attrition"):
-    try:
-        # 1. One-hot encode categorical variables
-        input_processed = pd.get_dummies(input_data)
+    col1, col2 = st.columns(2)
 
-        # 2. Align columns with the model training data
-        if hasattr(model, "feature_names_in_"):
-            expected_cols = model.feature_names_in_
-        else:
-            st.warning("Model does not expose feature names. Using input columns as-is.")
-            expected_cols = input_processed.columns
+    with col1:
+        st.subheader("Top Factors Increasing Attrition Likelihood (+)")
+        st.dataframe(
+            top_increase[['Feature', 'Coefficient']].style.background_gradient(cmap='Reds'),
+            use_container_width=True,
+            hide_index=True
+        )
 
-        # Add missing columns as 0 and drop extra columns
-        missing_cols = set(expected_cols) - set(input_processed.columns)
-        for c in missing_cols:
-            input_processed[c] = 0
-        input_processed = input_processed[expected_cols]
+    with col2:
+        st.subheader("Top Factors Decreasing Attrition Likelihood (-)")
+        st.dataframe(
+            top_decrease[['Feature', 'Coefficient']].style.background_gradient(cmap='Blues_r'),
+            use_container_width=True,
+            hide_index=True
+        )
 
-        # 3. Ensure all columns are numeric
-        input_processed = input_processed.astype(float)
 
-        # 4. Fill any NaN
-        input_processed = input_processed.fillna(0)
+def main():
+    """Main function to run the Streamlit application."""
+    st.set_page_config(page_title="Employee Attrition Predictor", layout="wide")
+    
+    # Title and Introduction
+    st.title("Employee Attrition Prediction App")
+    st.markdown("### Predict the likelihood of an employee leaving the company.")
+    st.markdown("Adjust the employee's attributes in the sidebar on the left and click 'Predict'.")
 
-        # 5. Apply scaler if available
-        if scaler is not None:
-            input_scaled = scaler.transform(input_processed)
-        else:
-            input_scaled = input_processed.values
+    # Get User Input
+    input_df = get_user_input()
 
-        # 6. Predict
-        prediction_output = model.predict(input_scaled)[0]
+    # Prediction Logic
+    if model:
+        st.header("Prediction Result")
+        
+        # Prepare data for display before prediction
+        st.markdown("#### Input Data Preview")
+        st.dataframe(input_df)
 
-        # 7. Predict probability of attrition (Yes / positive class)
-        try:
-            prob = model.predict_proba(input_scaled)[0][1]
-        except:
-            prob = None
+        if st.button("Predict Attrition Likelihood"):
+            try:
+                # Prediction
+                prediction_proba = model.predict_proba(input_df)
+                
+                # Attrition Yes Probability is usually the second column (index 1)
+                attrition_proba = prediction_proba[0, 1] 
+                
+                # Format output
+                percentage = f"{attrition_proba * 100:.2f}%"
+                
+                # Display result with a gauge or progress bar
+                st.metric(
+                    label="Probability of Attrition (Yes)", 
+                    value=percentage, 
+                    delta=f"{attrition_proba:.2f} (Base value)" if attrition_proba < 0.5 else f"{attrition_proba:.2f} (Warning)"
+                )
+                
+                if attrition_proba >= 0.5:
+                    st.warning("⚠️ High Risk of Attrition!")
+                else:
+                    st.success("✅ Low Risk of Attrition.")
 
-        # 8. Display result
-        if prediction_output in [1, "Yes"]:
-            msg = f"⚠️ The employee is **likely to leave**."
-            if prob is not None:
-                msg += f" (Probability: {prob:.2f})"
-            st.error(msg)
-        else:
-            msg = f"✅ The employee is **likely to stay**."
-            if prob is not None:
-                msg += f" (Leave Probability: {prob:.2f})"
-            st.success(msg)
+                # Display Feature Importance based on the mock/actual coefficient data
+                display_feature_importance(FEATURE_COEFFICIENTS)
 
-        st.write("---")
-        st.subheader("🧠 Model Input Data")
-        st.dataframe(input_data)
 
-    except Exception as e:
-        st.error(f"Prediction failed: {e}")
+            except Exception as e:
+                st.error(f"Prediction failed. This usually means the input features or their order/types do not match what the loaded model expects. Error: {e}")
+                st.exception(e)
+                
+    else:
+        st.warning("Cannot run prediction because the model failed to load. Please check the error message above.")
+
+
+if __name__ == "__main__":
+    main()
