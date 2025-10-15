@@ -5,63 +5,40 @@ import joblib
 import os
 
 # ----------------------------------------------------
-# Load the trained model (tries .joblib first, then common .pkl names)
+# Load the trained model and scaler
 # ----------------------------------------------------
-MODEL_CANDIDATES = [
-logistic_regression_model.pkl
-    scaler.pkl
-]
+MODEL_CANDIDATES = ["logistic_regression_model.pkl", "attrition_model.pkl", "employee-attrition.pkl", "attrition_model.joblib"]
+SCALER_CANDIDATES = ["scaler.pkl", "scaler.joblib"]
 
 model = None
-found = None
+scaler = None
+
+# --- Load Model ---
 for fname in MODEL_CANDIDATES:
     if os.path.exists(fname):
-        found = fname
+        if fname.endswith(".joblib"):
+            model = joblib.load(fname)
+        else:
+            with open(fname, "rb") as f:
+                model = pickle.load(f)
         break
 
-if found is None:
-    st.error(
-        "❌ No trained model found. Place one of the model files in the app folder: 'attrition_model.joblib', 'employee-attrition.joblib', 'employee-attrition.pkl', or 'attrition_model.pkl'."
-    )
+if model is None:
+    st.error("❌ No model file found. Please place one of these files in the folder:\n- logistic_regression_model.pkl\n- attrition_model.pkl\n- employee-attrition.pkl\n- attrition_model.joblib")
     st.stop()
 
-try:
-    if found.endswith(".joblib"):
-        try:
-            model = joblib.load(found)
-        except AttributeError as e:
-            # Common situation: sklearn helper classes moved between versions and
-            # the pickled object references a class path that doesn't exist.
-            # Try to parse the missing attribute and module from the message,
-            # create a minimal placeholder class in that module, and retry.
-            import re
-            import importlib
+# --- Load Scaler ---
+for fname in SCALER_CANDIDATES:
+    if os.path.exists(fname):
+        if fname.endswith(".joblib"):
+            scaler = joblib.load(fname)
+        else:
+            with open(fname, "rb") as f:
+                scaler = pickle.load(f)
+        break
 
-            msg = str(e)
-            m = re.search(r"Can't get attribute '(?P<attr>[^']+)' on <module '(?P<mod>[^']+)'", msg)
-            if m:
-                missing_attr = m.group('attr')
-                missing_mod = m.group('mod')
-                try:
-                    mod = importlib.import_module(missing_mod)
-                    # create a simple placeholder class with the same name
-                    placeholder = type(missing_attr, (), {})
-                    setattr(mod, missing_attr, placeholder)
-                    st.warning(f"Compatibility shim: created placeholder {missing_attr} in module {missing_mod}; retrying model load.")
-                    model = joblib.load(found)
-                except Exception as e2:
-                    st.error(f"Failed to create compatibility shim for '{missing_attr}' in module '{missing_mod}': {e2}")
-                    st.stop()
-            else:
-                st.error(f"Failed to load joblib model '{found}': {e}")
-                st.stop()
-    else:
-        # fall back to pickle for .pkl files
-        with open(found, "rb") as f:
-            model = pickle.load(f)
-except Exception as e:
-    st.error(f"Failed to load model '{found}': {e}")
-    st.stop()
+if scaler is None:
+    st.warning("⚠️ No scaler file found. Model input will not be scaled.")
 
 # ----------------------------------------------------
 # Streamlit page configuration
@@ -162,10 +139,27 @@ input_data = pd.DataFrame([{
 # ----------------------------------------------------
 if st.button("🔍 Predict Attrition"):
     try:
-        prediction = model.predict(input_data)[0]
-        prob = model.predict_proba(input_data)[0][1]
+        # One-hot encode categorical variables if model expects them
+        input_processed = pd.get_dummies(input_data)
 
-        if prediction == "Yes" or prediction == 1:
+        # Align columns with the model training data
+        if hasattr(model, "feature_names_in_"):
+            missing_cols = set(model.feature_names_in_) - set(input_processed.columns)
+            for c in missing_cols:
+                input_processed[c] = 0
+            input_processed = input_processed[model.feature_names_in_]
+
+        # Scale numerical features if scaler is present
+        if scaler is not None:
+            input_scaled = scaler.transform(input_processed)
+        else:
+            input_scaled = input_processed
+
+        # Predict
+        prediction = model.predict(input_scaled)[0]
+        prob = model.predict_proba(input_scaled)[0][1]
+
+        if prediction == 1 or str(prediction).lower() == "yes":
             st.error(f"⚠️ The employee is **likely to leave**. (Probability: {prob:.2f})")
         else:
             st.success(f"✅ The employee is **likely to stay**. (Leave Probability: {prob:.2f})")
