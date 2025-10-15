@@ -3,104 +3,91 @@ import pandas as pd
 import pickle
 import joblib
 import os
+import re
+import importlib
 
 # ----------------------------------------------------
-
 # Load the trained model and scaler
 # ----------------------------------------------------
-MODEL_CANDIDATES = ["logistic_regression_model.pkl", "attrition_model.pkl", "employee-attrition.pkl", "attrition_model.joblib"]
-SCALER_CANDIDATES = ["scaler.pkl", "scaler.joblib"]
+
+# Define candidates for model files (prioritize joblib as it's often better for large NumPy arrays)
+MODEL_CANDIDATES = [
+    "attrition_model.joblib",
+    "employee-attrition.joblib",
+    "logistic_regression_model.pkl", # Kept from original HEAD
+    "attrition_model.pkl",
+    "employee-attrition.pkl",
+]
+SCALER_CANDIDATES = ["scaler.joblib", "scaler.pkl"] # Prioritize joblib
 
 model = None
 scaler = None
 
 # --- Load Model ---
+model_found = None
 for fname in MODEL_CANDIDATES:
     if os.path.exists(fname):
-        if fname.endswith(".joblib"):
-            model = joblib.load(fname)
-        else:
-            with open(fname, "rb") as f:
-                model = pickle.load(f)
+        model_found = fname
         break
 
-if model is None:
-    st.error("❌ No model file found. Please place one of these files in the folder:\n- logistic_regression_model.pkl\n- attrition_model.pkl\n- employee-attrition.pkl\n- attrition_model.joblib")
-    st.stop()
-
-# --- Load Scaler ---
-for fname in SCALER_CANDIDATES:
-    if os.path.exists(fname):
-        if fname.endswith(".joblib"):
-            scaler = joblib.load(fname)
-        else:
-            with open(fname, "rb") as f:
-                scaler = pickle.load(f)
-        break
-
-if scaler is None:
-    st.warning("⚠️ No scaler file found. Model input will not be scaled.")
-=======
-# Load the trained model (tries .joblib first, then common .pkl names)
-# ----------------------------------------------------
-MODEL_CANDIDATES = [
-    "attrition_model.joblib",
-    "employee-attrition.joblib",
-    "employee-attrition.pkl",
-    "attrition_model.pkl",
-]
-
-model = None
-found = None
-for fname in MODEL_CANDIDATES:
-    if os.path.exists(fname):
-        found = fname
-        break
-
-if found is None:
-    st.error(
-        "❌ No trained model found. Place one of the model files in the app folder: 'attrition_model.joblib', 'employee-attrition.joblib', 'employee-attrition.pkl', or 'attrition_model.pkl'."
-    )
+if model_found is None:
+    st.error("❌ No trained model found. Place one of the model files in the app folder: 'attrition_model.joblib', 'employee-attrition.joblib', 'logistic_regression_model.pkl', 'attrition_model.pkl', or 'employee-attrition.pkl'.")
     st.stop()
 
 try:
-    if found.endswith(".joblib"):
+    if model_found.endswith(".joblib"):
+        # Attempt to load joblib file with a basic compatibility shim
         try:
-            model = joblib.load(found)
+            model = joblib.load(model_found)
         except AttributeError as e:
-            # Common situation: sklearn helper classes moved between versions and
-            # the pickled object references a class path that doesn't exist.
-            # Try to parse the missing attribute and module from the message,
-            # create a minimal placeholder class in that module, and retry.
-            import re
-            import importlib
-
+            # Simple fix for common sklearn versioning issues (as seen in the second version's logic)
             msg = str(e)
             m = re.search(r"Can't get attribute '(?P<attr>[^']+)' on <module '(?P<mod>[^']+)'", msg)
             if m:
                 missing_attr = m.group('attr')
                 missing_mod = m.group('mod')
                 try:
+                    # Create a simple placeholder class
                     mod = importlib.import_module(missing_mod)
-                    # create a simple placeholder class with the same name
                     placeholder = type(missing_attr, (), {})
                     setattr(mod, missing_attr, placeholder)
                     st.warning(f"Compatibility shim: created placeholder {missing_attr} in module {missing_mod}; retrying model load.")
-                    model = joblib.load(found)
+                    model = joblib.load(model_found)
                 except Exception as e2:
-                    st.error(f"Failed to create compatibility shim for '{missing_attr}' in module '{missing_mod}': {e2}")
+                    st.error(f"Failed to load joblib model due to AttributeError and failed shim: {e2}")
                     st.stop()
             else:
-                st.error(f"Failed to load joblib model '{found}': {e}")
+                st.error(f"Failed to load joblib model '{model_found}': {e}")
                 st.stop()
     else:
-        # fall back to pickle for .pkl files
-        with open(found, "rb") as f:
+        # Load .pkl files using pickle
+        with open(model_found, "rb") as f:
             model = pickle.load(f)
 except Exception as e:
-    st.error(f"Failed to load model '{found}': {e}")
+    st.error(f"Failed to load model '{model_found}': {e}")
     st.stop()
->>>>>>> 8064106 (Updated app and data files)
+
+# --- Load Scaler ---
+scaler_found = None
+for fname in SCALER_CANDIDATES:
+    if os.path.exists(fname):
+        scaler_found = fname
+        break
+
+if scaler_found is not None:
+    try:
+        if scaler_found.endswith(".joblib"):
+            scaler = joblib.load(scaler_found)
+        else:
+            with open(scaler_found, "rb") as f:
+                scaler = pickle.load(f)
+    except Exception as e:
+        st.error(f"Failed to load scaler '{scaler_found}': {e}")
+        scaler = None # Set to None if loading fails, to proceed without scaling
+
+if scaler is None:
+    st.warning("⚠️ No scaler file found or failed to load. Model input will not be scaled. Proceeding with unscaled data.")
+
 
 # ----------------------------------------------------
 # Streamlit page configuration
@@ -109,8 +96,7 @@ st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
 st.title("💼 Employee Attrition Prediction App")
 
 st.markdown("""
-This app predicts whether an employee is likely to **leave (Attrition = Yes)** or **stay (Attrition = No)**  
-based on their work-related information.
+This app predicts whether an employee is likely to **leave (Attrition = Yes)** or **stay (Attrition = No)** based on their work-related information.
 """)
 
 # ----------------------------------------------------
@@ -201,34 +187,50 @@ input_data = pd.DataFrame([{
 # ----------------------------------------------------
 if st.button("🔍 Predict Attrition"):
     try:
-<<<<<<< HEAD
-        # One-hot encode categorical variables if model expects them
+        # **Robust Data Processing (adopted from HEAD)**
+        # 1. One-hot encode categorical variables
         input_processed = pd.get_dummies(input_data)
 
-        # Align columns with the model training data
+        # 2. Align columns with the model training data
+        # This is CRITICAL. It ensures the input features are in the same order
+        # as the features the model was trained on, adding missing OHE columns as 0.
         if hasattr(model, "feature_names_in_"):
-            missing_cols = set(model.feature_names_in_) - set(input_processed.columns)
-            for c in missing_cols:
-                input_processed[c] = 0
-            input_processed = input_processed[model.feature_names_in_]
+            expected_cols = model.feature_names_in_
+        # Fallback for models without feature_names_in_ (you might need to provide a list here)
+        elif hasattr(model, "coef_") and isinstance(getattr(model, 'coef_'), pd.DataFrame):
+            # Attempt to use coef_ if it's a DataFrame with feature names (less common)
+            expected_cols = model.coef_.columns
+        else:
+             # This is a safe (but slow) assumption for many models; requires original training columns
+            # For a real-world app, you should save the feature names along with the model/scaler.
+            st.warning("Model does not expose feature names. Prediction might fail if features are misaligned.")
+            # For demonstration, we'll try to proceed with the encoded data as-is if no feature names are found.
+            expected_cols = input_processed.columns
 
-        # Scale numerical features if scaler is present
+        # Ensure all expected columns are present (fill with 0 if missing, drop extra)
+        missing_cols = set(expected_cols) - set(input_processed.columns)
+        for c in missing_cols:
+            input_processed[c] = 0
+        input_processed = input_processed[expected_cols]
+
+        # 3. Scale numerical features if scaler is present
         if scaler is not None:
+            # Note: The scaler should only be applied to the numerical columns.
+            # If the entire one-hot encoded array is scaled, the OHE columns (0s and 1s) will be scaled too.
+            # If the model was trained by scaling the full OHE array, this is correct.
+            # Assuming the model expects the fully encoded array to be scaled, as per the original HEAD logic.
             input_scaled = scaler.transform(input_processed)
         else:
             input_scaled = input_processed
 
         # Predict
-        prediction = model.predict(input_scaled)[0]
+        prediction_output = model.predict(input_scaled)[0]
+        # prob is the probability of the positive class (usually 1, or 'Yes' for attrition)
         prob = model.predict_proba(input_scaled)[0][1]
 
-        if prediction == 1 or str(prediction).lower() == "yes":
-=======
-        prediction = model.predict(input_data)[0]
-        prob = model.predict_proba(input_data)[0][1]
-
-        if prediction == "Yes" or prediction == 1:
->>>>>>> 8064106 (Updated app and data files)
+        # Check prediction type and report result
+        # Standard binary prediction is 1/0 or 'Yes'/'No'
+        if prediction_output in [1, "Yes"]:
             st.error(f"⚠️ The employee is **likely to leave**. (Probability: {prob:.2f})")
         else:
             st.success(f"✅ The employee is **likely to stay**. (Leave Probability: {prob:.2f})")
@@ -238,8 +240,4 @@ if st.button("🔍 Predict Attrition"):
         st.dataframe(input_data)
 
     except Exception as e:
-<<<<<<< HEAD
         st.error(f"Prediction failed: {e}")
-=======
-        st.error(f"Prediction failed: {e}")
->>>>>>> 8064106 (Updated app and data files)
