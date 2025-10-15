@@ -18,27 +18,50 @@ except Exception as e:
 
 # --- 2. Configuration and Helper Data ---
 
-# Define the features and their possible values/ranges based on a typical HR Attrition dataset.
-# The order of features in the input DataFrame MUST match the order expected by the pipeline.
-# Since the pipeline uses a ColumnTransformer, the feature names just need to be correct, 
-# but defining them is crucial for the Streamlit UI.
-
-# This dictionary is used to create the user inputs in the sidebar.
+# Define the full set of 30 features required by the trained model pipeline.
+# Grouped features for better UI flow in the sidebar.
 FEATURE_DEFS = {
+    # Personal & Demographic (7 features)
     'Age': {'type': 'slider', 'min': 18, 'max': 60, 'default': 35},
     'Gender': {'type': 'select', 'options': ['Male', 'Female'], 'default': 'Male'},
     'MaritalStatus': {'type': 'select', 'options': ['Single', 'Married', 'Divorced'], 'default': 'Married'},
+    'DistanceFromHome': {'type': 'slider', 'min': 1, 'max': 29, 'default': 10},
+    'NumCompaniesWorked': {'type': 'slider', 'min': 0, 'max': 9, 'default': 2},
+    'Education': {'type': 'select', 'options': [1, 2, 3, 4, 5], 'default': 3, 'help': '1=Below College, 5=Doctorate'},
+    'EducationField': {'type': 'select', 'options': ['Life Sciences', 'Medical', 'Marketing', 'Technical Degree', 'Human Resources', 'Other'], 'default': 'Life Sciences'},
+
+    # Role & Travel (5 features)
     'Department': {'type': 'select', 'options': ['Research & Development', 'Sales', 'Human Resources'], 'default': 'Research & Development'},
     'JobRole': {'type': 'select', 'options': ['Sales Executive', 'Research Scientist', 'Laboratory Technician', 'Manufacturing Director', 'Healthcare Representative', 'Manager', 'Sales Representative', 'Research Director', 'Human Resources'], 'default': 'Research Scientist'},
-    'BusinessTravel': {'type': 'select', 'options': ['Non-Travel', 'Travel_Rarely', 'Travel_Frequently'], 'default': 'Travel_Rarely'},
-    'DistanceFromHome': {'type': 'slider', 'min': 1, 'max': 29, 'default': 10},
+    'JobLevel': {'type': 'select', 'options': [1, 2, 3, 4, 5], 'default': 2, 'help': '1=Entry Level, 5=Executive'},
     'OverTime': {'type': 'select', 'options': ['Yes', 'No'], 'default': 'No'},
+    'BusinessTravel': {'type': 'select', 'options': ['Non-Travel', 'Travel_Rarely', 'Travel_Frequently'], 'default': 'Travel_Rarely'},
+
+    # Compensation & Financial (6 features)
     'MonthlyIncome': {'type': 'slider', 'min': 1000, 'max': 20000, 'default': 5000, 'step': 100},
+    'DailyRate': {'type': 'slider', 'min': 100, 'max': 1500, 'default': 800, 'step': 50},
+    'HourlyRate': {'type': 'slider', 'min': 30, 'max': 100, 'default': 65},
+    'MonthlyRate': {'type': 'slider', 'min': 2000, 'max': 27000, 'default': 14000, 'step': 100},
+    'PercentSalaryHike': {'type': 'slider', 'min': 11, 'max': 25, 'default': 15},
+    'StockOptionLevel': {'type': 'select', 'options': [0, 1, 2, 3], 'default': 1},
+
+    # Experience & Tenure (5 features)
     'TotalWorkingYears': {'type': 'slider', 'min': 0, 'max': 40, 'default': 10},
     'YearsAtCompany': {'type': 'slider', 'min': 0, 'max': 40, 'default': 5},
+    'YearsInCurrentRole': {'type': 'slider', 'min': 0, 'max': 18, 'default': 3},
+    'YearsSinceLastPromotion': {'type': 'slider', 'min': 0, 'max': 15, 'default': 1},
+    'YearsWithCurrManager': {'type': 'slider', 'min': 0, 'max': 17, 'default': 3},
+
+    # Satisfaction & Ratings (7 features)
     'JobSatisfaction': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Low, 4=High'},
     'EnvironmentSatisfaction': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Low, 4=High'},
+    'RelationshipSatisfaction': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Low, 4=High'},
+    'JobInvolvement': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Low, 4=High'},
+    'WorkLifeBalance': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Bad, 4=Best'},
+    'PerformanceRating': {'type': 'select', 'options': [1, 2, 3, 4], 'default': 3, 'help': '1=Low, 4=High'},
+    'TrainingTimesLastYear': {'type': 'select', 'options': [0, 1, 2, 3, 4, 5, 6], 'default': 3},
 }
+
 
 # Placeholder for Feature Importance (Replace with actual data from your notebook's Cell 35)
 # This mock data is just to show how the display works.
@@ -62,6 +85,7 @@ def get_user_input():
     
     st.sidebar.markdown("### Employee Attributes")
     
+    # Iterate through the DEFINED order to ensure the DataFrame columns match the model
     for feature, config in FEATURE_DEFS.items():
         key = feature.replace(' ', '_')
         
@@ -81,7 +105,8 @@ def get_user_input():
                 help=config.get('help', None)
             )
             
-    # Convert input to a single-row DataFrame
+    # Convert input to a single-row DataFrame. The column order is implicitly 
+    # preserved from the FEATURE_DEFS dictionary.
     return pd.DataFrame([input_data])
 
 def display_feature_importance(df):
@@ -90,7 +115,7 @@ def display_feature_importance(df):
     st.header("Model Insights: Feature Importance")
     st.markdown("""
         The factors below show the effect of each feature on the likelihood of Attrition.
-        (Note: These are sample values. Replace with the actual coefficients from your model.)
+        (Note: These are sample values. **Replace these with the actual coefficients from your model's `coef_df`**.)
     """)
 
     top_increase = df.head(5).reset_index()
@@ -138,6 +163,7 @@ def main():
         if st.button("Predict Attrition Likelihood"):
             try:
                 # Prediction
+                # This will now include all 30 features expected by the pipeline
                 prediction_proba = model.predict_proba(input_df)
                 
                 # Attrition Yes Probability is usually the second column (index 1)
@@ -163,6 +189,7 @@ def main():
 
 
             except Exception as e:
+                # General error handling remains useful
                 st.error(f"Prediction failed. This usually means the input features or their order/types do not match what the loaded model expects. Error: {e}")
                 st.exception(e)
                 
